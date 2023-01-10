@@ -8,6 +8,18 @@ cleanup() {
   [ -f "${TEMP_KCL}" ] && rm "${TEMP_KCL}"
 }
 
+clean_kcl() {
+  # Strip leading and trailing spaces
+  sed -i 's/^[[:space:]]*//g;s/[[:space:]]*$//g' "${1}"
+
+  # Remove existing null terminators
+  sed -i 's/\x0//g' "${1}"
+
+  # Collapse multiple lines into one
+  sed -i -z 's/\n/ /g' "${1}"
+}
+
+
 usage() {
   cat <<-EOF
     USAGE: $0 [-e <arg>] [-f <arg>] [-k <arg>] [-o <arg>]
@@ -16,8 +28,9 @@ usage() {
     -f <arg>  Replace kernel command line with contents of file
     -k <arg>  Replace kernel command line with quoted arguments
     -o <arg>  Output file; if undefined the input file will be replaced
+    -p        Print the command line stored the input file and exit
 
-    If neither -f or -k are provided, the command line from the
+    If neither -f, -k, or -p are provided, the command line from the
     input EFI will be opened in \$EDITOR.
 	EOF
 }
@@ -26,8 +39,9 @@ INPUT_EFI=
 OUTPUT_EFI=
 ARG_FILE=
 ARG_VAR=
+PRINT_ONLY=0
 
-while getopts "e:f:k:o:" opt; do
+while getopts "e:f:k:o:p" opt; do
   case "${opt}" in
     e)
       INPUT_EFI="${OPTARG}"
@@ -53,6 +67,9 @@ while getopts "e:f:k:o:" opt; do
     k)
       ARG_VAR="${OPTARG}"
       ARG_FILE=
+      ;;
+    p)
+      PRINT_ONLY=1
       ;;
     *)
       usage
@@ -81,6 +98,7 @@ if ! objout="$( objcopy --remove-section .cmdline "${INPUT_EFI}" "${TEMP_EFI}" 2
 fi
 
 TEMP_KCL="$(mktemp)"
+
 if [ -n "${ARG_VAR}" ]; then
   echo -n "${ARG_VAR}" > "${TEMP_KCL}"
 elif [ -n "${ARG_FILE}" ]; then
@@ -92,11 +110,12 @@ else
     exit 1
   fi
 
-  # Remove null terminators
-  sed -i 's/\x0//g' "${TEMP_KCL}"
+  clean_kcl "${TEMP_KCL}"
 
-  # Strip leading and trailing spaces
-  sed -i 's/^[[:space:]]*//g;s/[[:space:]]*$//g' "${TEMP_KCL}"
+  if ((PRINT_ONLY)); then
+    cat "${TEMP_KCL}"
+    exit
+  fi
 
   if ! command -v "${EDITOR:=vi}" >/dev/null 2>&1 ; then
     echo "define \$EDITOR to edit"
@@ -109,14 +128,7 @@ else
   fi
 fi
 
-# Strip leading and trailing spaces
-sed -i 's/^[[:space:]]*//g;s/[[:space:]]*$//g' "${TEMP_KCL}"
-
-# Remove existing null terminators
-sed -i 's/\x0//g' "${TEMP_KCL}"
-
-# Collapse multiple lines into one
-sed -i -z 's/\n/ /g' "${TEMP_KCL}"
+clean_kcl "${TEMP_KCL}"
 
 # Pad with a space; replicating Dracut behavior.
 # FIXME: Is this strictly needed?
